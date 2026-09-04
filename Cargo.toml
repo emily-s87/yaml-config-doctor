@@ -1,0 +1,8 @@
+[package]
+name = "yaml-config-doctor"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "A small library for parsing and linting YAML configuration files, with human-readable and JSON diagnostic output."
+
+[dependencies]
