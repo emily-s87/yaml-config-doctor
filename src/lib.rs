@@ -1,11 +1,11 @@
 //! A dependency-free library for parsing and linting YAML configuration
 //! files.
 //!
-//! [`load`] parses a practical subset of YAML (mappings, sequences,
-//! scalars, comments) into a [`Value`] tree and runs a small set of lint
-//! checks (duplicate keys, tabs, trailing whitespace, long lines) over the
-//! source text. The result is a [`Document`] that can be rendered either
-//! for a human or as JSON via [`report::render`].
+//! [`load`] parses a practical subset of YAML (mappings, sequences, flow
+//! collections, scalars, comments) into a [`Value`] tree and runs a small
+//! set of lint checks (duplicate keys, tabs, trailing whitespace, long
+//! lines) over the source text. The result is a [`Document`] that can be
+//! rendered either for a human or as JSON via [`report::render`].
 
 pub mod lint;
 pub mod parser;

@@ -20,13 +20,15 @@ choice.
 
 - block mappings (`key: value`) and block sequences (`- item`)
 - nesting through indentation, including sequences of mappings
+- flow-style collections (`{a: 1, b: 2}`, `[1, 2, 3]`), including nested
+  ones (`[{a: 1}, {a: 2}]`), as the value on a single line
 - scalars: strings (plain, single- and double-quoted), integers, floats,
   booleans, and null (`null`, `~`, empty)
 - `#` comments, including telling a real comment from a `#` inside a
   quoted string
 
-Not supported: flow style (`{a: 1}`, `[1, 2]`), anchors and aliases, tags,
-multi-line block scalars (`|`, `>`), and multi-document streams. The top
+Not supported: anchors and aliases, tags, multi-line block scalars (`|`,
+`>`), multi-line flow collections, and multi-document streams. The top
 level of a document must be a mapping or a sequence. Trying to parse
 anything outside this subset returns a `ParseError` with a line number
 rather than guessing.
