@@ -92,6 +92,35 @@ Each diagnostic carries a line number, a severity (`warning` or `error`),
 and a message, and is available regardless of which output format you
 render.
 
+## Schema validation
+
+`load` only checks that a file is well-formed YAML and free of the lint
+issues above; it says nothing about whether the *shape* is right. `schema`
+covers that:
+
+```rust
+use yaml_config_doctor::{load, validate, Field, Schema};
+
+let doc = load("name: payments-api\nport: 8080\n").unwrap();
+
+let schema = Schema::Mapping(vec![
+    Field::required("name", Schema::String),
+    Field::required("port", Schema::Int),
+    Field::optional("retries", Schema::Int),
+]);
+
+let errors = validate(&doc.value, &schema);
+assert!(errors.is_empty());
+```
+
+A mismatch comes back as a `ValidationError` with a `$`-rooted path
+(`$.servers[1].port`) and a message, and `validate` collects every
+violation in the tree rather than stopping at the first one. Available
+schema shapes: `Any`, `Null`, `Bool`, `Int`, `Float` (also accepts an
+`Int`), `String`, `Sequence(Box<Schema>)`, `Mapping(Vec<Field>)`, and
+`OneOf(Vec<Schema>)` for a value that just needs to match one of several
+shapes.
+
 ## Status
 
 Early. The parser covers the common shapes of hand-written config files;

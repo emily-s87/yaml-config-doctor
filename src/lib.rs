@@ -6,13 +6,19 @@
 //! set of lint checks (duplicate keys, tabs, trailing whitespace, long
 //! lines) over the source text. The result is a [`Document`] that can be
 //! rendered either for a human or as JSON via [`report::render`].
+//!
+//! [`schema::validate`] separately checks a parsed [`Value`] against a
+//! [`Schema`] describing the shape a config is expected to have (required
+//! fields, field types), for callers that want more than "it parsed".
 
 pub mod lint;
 pub mod parser;
 pub mod report;
+pub mod schema;
 
 pub use parser::{Diagnostic, Document, ParseError, Severity, Value};
 pub use report::OutputFormat;
+pub use schema::{validate, Field, Schema, ValidationError};
 
 /// Parses `input` and merges the parser's own diagnostics (duplicate keys)
 /// with the text-level lint diagnostics from [`lint::scan`], sorted by
