@@ -92,6 +92,20 @@ Each diagnostic carries a line number, a severity (`warning` or `error`),
 and a message, and is available regardless of which output format you
 render.
 
+Any of that is configurable through `LintConfig`, for callers with their
+own house style:
+
+```rust
+use yaml_config_doctor::{load_with_lint_config, LintConfig, Severity};
+
+let mut config = LintConfig::default();
+config.max_line_length = 200;
+config.check_tabs = false;
+config.min_severity = Severity::Error; // drop warning-level diagnostics
+
+let doc = load_with_lint_config("name: payments-api\n", &config).unwrap();
+```
+
 ## Schema validation
 
 `load` only checks that a file is well-formed YAML and free of the lint

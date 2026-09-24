@@ -44,7 +44,9 @@ impl Value {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Ordered `Warning < Error` so a minimum-severity filter can compare
+/// against it directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
     Warning,
     Error,
