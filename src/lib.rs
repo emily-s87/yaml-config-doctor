@@ -6,6 +6,7 @@
 //! set of lint checks (duplicate keys, tabs, trailing whitespace, long
 //! lines) over the source text. The result is a [`Document`] that can be
 //! rendered either for a human or as JSON via [`report::render`].
+//! [`load_all`] does the same for a `---`-separated stream of documents.
 //!
 //! [`schema::validate`] separately checks a parsed [`Value`] against a
 //! [`Schema`] describing the shape a config is expected to have (required
@@ -37,6 +38,30 @@ pub fn load_with_lint_config(input: &str, lint_config: &LintConfig) -> Result<Do
     doc.diagnostics.append(&mut extra);
     doc.diagnostics.sort_by_key(|d| d.line);
     Ok(doc)
+}
+
+/// Parses `input` as a `---`-separated stream of one or more documents and
+/// runs the same lint pass as [`load`] over the whole file, routing each
+/// diagnostic to whichever document its line falls in. Use this instead of
+/// [`load`] for input that may contain more than one document.
+pub fn load_all(input: &str) -> Result<Vec<Document>, ParseError> {
+    load_all_with_lint_config(input, &LintConfig::default())
+}
+
+/// Like [`load_all`], but runs the text-level lint checks with a
+/// caller-supplied [`LintConfig`] instead of the defaults.
+pub fn load_all_with_lint_config(input: &str, lint_config: &LintConfig) -> Result<Vec<Document>, ParseError> {
+    let mut docs = parser::parse_all(input)?;
+    let ranges = parser::document_ranges(input);
+    for diag in lint::scan(input, lint_config) {
+        if let Some(idx) = ranges.iter().position(|&(start, end)| start <= diag.line && diag.line <= end) {
+            docs[idx].diagnostics.push(diag);
+        }
+    }
+    for doc in &mut docs {
+        doc.diagnostics.sort_by_key(|d| d.line);
+    }
+    Ok(docs)
 }
 
 #[cfg(test)]
@@ -76,5 +101,27 @@ mod tests {
         config.min_severity = Severity::Error;
         let doc = load_with_lint_config(input, &config).unwrap();
         assert!(doc.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn load_treats_a_lone_leading_marker_as_a_single_document() {
+        let doc = load("---\nname: demo\n").unwrap();
+        assert_eq!(doc.value.get("name").and_then(Value::as_str), Some("demo"));
+    }
+
+    #[test]
+    fn load_all_parses_a_multi_document_stream() {
+        let docs = load_all("a: 1\n---\nb: 2\n").unwrap();
+        assert_eq!(docs.len(), 2);
+        assert_eq!(docs[0].value.get("a"), Some(&Value::Int(1)));
+        assert_eq!(docs[1].value.get("b"), Some(&Value::Int(2)));
+    }
+
+    #[test]
+    fn load_all_routes_lint_diagnostics_to_the_right_document() {
+        let input = "a: 1\t\n---\nb: 2 \n";
+        let docs = load_all(input).unwrap();
+        assert!(docs[0].diagnostics.iter().any(|d| d.message.contains("tab")));
+        assert!(docs[1].diagnostics.iter().any(|d| d.message.contains("trailing whitespace")));
     }
 }

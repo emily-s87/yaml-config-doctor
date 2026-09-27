@@ -1,8 +1,9 @@
 use std::fmt;
 
 /// A parsed YAML value. Only the subset of YAML actually handled by this
-/// crate is represented here: no anchors, aliases, tags, or multi-document
-/// streams.
+/// crate is represented here: no anchors, aliases, or tags. A `---`
+/// separated stream of documents is handled at the [`parse_all`] level,
+/// each document producing its own independent `Value` tree.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Null,
@@ -97,9 +98,32 @@ struct Line<'a> {
     number: usize,
 }
 
+/// Parses a single YAML document. Returns an error if `input` holds more
+/// than one `---`-separated document - use [`parse_all`] for streams. A
+/// lone leading `---` with nothing before it does not count as a second
+/// document, since that is the ordinary way to mark the start of an
+/// otherwise single-document file.
 pub fn parse(input: &str) -> Result<Document, ParseError> {
+    let mut raw_docs = split_documents(input);
+    if raw_docs.len() > 1 {
+        let line = raw_docs[1].marker_line.unwrap_or(1);
+        return Err(ParseError {
+            line,
+            message: "input contains multiple YAML documents; use parse_all".to_string(),
+        });
+    }
+    parse_one(raw_docs.remove(0))
+}
+
+/// Parses every document in a `---`-separated YAML stream. A stream with
+/// no separators at all parses as a single document, same as [`parse`].
+pub fn parse_all(input: &str) -> Result<Vec<Document>, ParseError> {
+    split_documents(input).into_iter().map(parse_one).collect()
+}
+
+fn parse_one(raw: RawDocument) -> Result<Document, ParseError> {
     let mut diagnostics = Vec::new();
-    let lines = preprocess(input);
+    let lines = preprocess_lines(raw.lines.into_iter());
     if lines.is_empty() {
         return Ok(Document { value: Value::Null, diagnostics });
     }
@@ -113,10 +137,9 @@ pub fn parse(input: &str) -> Result<Document, ParseError> {
     Ok(Document { value, diagnostics })
 }
 
-fn preprocess(input: &str) -> Vec<Line> {
+fn preprocess_lines<'a>(lines: impl Iterator<Item = (usize, &'a str)>) -> Vec<Line<'a>> {
     let mut out = Vec::new();
-    for (i, raw) in input.lines().enumerate() {
-        let number = i + 1;
+    for (number, raw) in lines {
         let no_comment = strip_comment(raw);
         let trimmed = no_comment.trim_end();
         if trimmed.trim_start().is_empty() {
@@ -126,6 +149,64 @@ fn preprocess(input: &str) -> Vec<Line> {
         out.push(Line { indent, content: &trimmed[indent..], number });
     }
     out
+}
+
+/// One `---`-delimited document's worth of raw, still-commented source
+/// lines, plus the line its leading `---` was found on (`None` for a
+/// document that opens the file with no marker at all).
+struct RawDocument<'a> {
+    lines: Vec<(usize, &'a str)>,
+    marker_line: Option<usize>,
+}
+
+/// Splits `input` on bare `---` document-start markers and drops bare
+/// `...` document-end markers, matching YAML's stream syntax closely
+/// enough for hand-written config files: a marker only counts at column
+/// zero, `--- ` may be followed by that document's first line of content,
+/// and a leading marker with nothing before it does not create a
+/// spurious empty first document.
+fn split_documents<'a>(input: &'a str) -> Vec<RawDocument<'a>> {
+    let mut docs: Vec<RawDocument<'a>> = vec![RawDocument { lines: Vec::new(), marker_line: None }];
+    for (i, raw) in input.lines().enumerate() {
+        let number = i + 1;
+        let no_comment = strip_comment(raw);
+        let trimmed = no_comment.trim_end();
+        if trimmed == "---" {
+            docs.push(RawDocument { lines: Vec::new(), marker_line: Some(number) });
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("--- ") {
+            docs.push(RawDocument { lines: Vec::new(), marker_line: Some(number) });
+            if !rest.trim().is_empty() {
+                docs.last_mut().unwrap().lines.push((number, rest));
+            }
+            continue;
+        }
+        if trimmed == "..." {
+            continue;
+        }
+        docs.last_mut().unwrap().lines.push((number, raw));
+    }
+    if docs.len() > 1 && docs[0].lines.is_empty() {
+        docs.remove(0);
+    }
+    docs
+}
+
+/// The 1-indexed, inclusive line range each document from [`parse_all`]
+/// spans in `input`, in the same order `parse_all` returns documents.
+/// Used to route whole-file lint diagnostics (numbered against the full
+/// input, not a single document) to the right document; an empty
+/// document gets an empty `(0, 0)` range that no real line number falls
+/// into.
+pub fn document_ranges(input: &str) -> Vec<(usize, usize)> {
+    split_documents(input)
+        .iter()
+        .map(|doc| match (doc.lines.first(), doc.lines.last()) {
+            (Some((first, _)), Some((last, _))) => (*first, *last),
+            _ => (0, 0),
+        })
+        .collect()
 }
 
 /// Cuts off a trailing `#` comment, but only when the `#` sits outside a
@@ -640,5 +721,55 @@ mod tests {
     fn rejects_unterminated_flow_mapping() {
         let err = parse("a: {b: 1\n").unwrap_err();
         assert_eq!(err.line, 1);
+    }
+
+    #[test]
+    fn parse_all_splits_a_stream_into_documents() {
+        let docs = parse_all("a: 1\n---\nb: 2\n---\nc: 3\n").unwrap();
+        assert_eq!(docs.len(), 3);
+        assert_eq!(docs[0].value.get("a"), Some(&Value::Int(1)));
+        assert_eq!(docs[1].value.get("b"), Some(&Value::Int(2)));
+        assert_eq!(docs[2].value.get("c"), Some(&Value::Int(3)));
+    }
+
+    #[test]
+    fn parse_all_supports_content_on_the_marker_line() {
+        let docs = parse_all("--- a: 1\n--- b: 2\n").unwrap();
+        assert_eq!(docs.len(), 2);
+        assert_eq!(docs[0].value.get("a"), Some(&Value::Int(1)));
+        assert_eq!(docs[1].value.get("b"), Some(&Value::Int(2)));
+    }
+
+    #[test]
+    fn parse_all_handles_explicit_document_end_markers() {
+        let docs = parse_all("a: 1\n...\n---\nb: 2\n").unwrap();
+        assert_eq!(docs.len(), 2);
+        assert_eq!(docs[0].value.get("a"), Some(&Value::Int(1)));
+        assert_eq!(docs[1].value.get("b"), Some(&Value::Int(2)));
+    }
+
+    #[test]
+    fn parse_all_treats_a_stream_with_no_markers_as_one_document() {
+        let docs = parse_all("a: 1\nb: 2\n").unwrap();
+        assert_eq!(docs.len(), 1);
+    }
+
+    #[test]
+    fn parse_rejects_a_stream_with_more_than_one_document() {
+        let err = parse("a: 1\n---\nb: 2\n").unwrap_err();
+        assert_eq!(err.line, 2);
+        assert!(err.message.contains("multiple"));
+    }
+
+    #[test]
+    fn parse_accepts_a_lone_leading_marker_as_one_document() {
+        let doc = parse("---\na: 1\n").unwrap();
+        assert_eq!(doc.value.get("a"), Some(&Value::Int(1)));
+    }
+
+    #[test]
+    fn document_ranges_line_up_with_parse_all() {
+        let ranges = document_ranges("a: 1\n---\nb: 2\n");
+        assert_eq!(ranges, vec![(1, 1), (3, 3)]);
     }
 }

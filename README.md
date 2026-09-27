@@ -26,12 +26,13 @@ choice.
   booleans, and null (`null`, `~`, empty)
 - `#` comments, including telling a real comment from a `#` inside a
   quoted string
+- `---`-separated multi-document streams, including an explicit `...` end
+  marker and content on the same line as a `---`
 
 Not supported: anchors and aliases, tags, multi-line block scalars (`|`,
-`>`), multi-line flow collections, and multi-document streams. The top
-level of a document must be a mapping or a sequence. Trying to parse
-anything outside this subset returns a `ParseError` with a line number
-rather than guessing.
+`>`), and multi-line flow collections. The top level of a document must be
+a mapping or a sequence. Trying to parse anything outside this subset
+returns a `ParseError` with a line number rather than guessing.
 
 ## Usage
 
@@ -105,6 +106,32 @@ config.min_severity = Severity::Error; // drop warning-level diagnostics
 
 let doc = load_with_lint_config("name: payments-api\n", &config).unwrap();
 ```
+
+## Multi-document streams
+
+`load` and `parse` accept a single document (a lone leading `---` is fine,
+but a second one is an error). For a file with more than one document,
+separated by `---`, use `load_all`:
+
+```rust
+use yaml_config_doctor::load_all;
+
+let input = "\
+name: staging
+port: 8080
+---
+name: production
+port: 9090
+";
+
+let docs = load_all(input).unwrap();
+assert_eq!(docs.len(), 2);
+```
+
+Lint diagnostics are still computed over the whole file and line numbers
+stay absolute, but each diagnostic ends up attached to whichever document
+its line actually belongs to. `load_all_with_lint_config` takes a
+`LintConfig` the same way `load_with_lint_config` does.
 
 ## Schema validation
 
